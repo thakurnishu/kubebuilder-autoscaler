@@ -1,0 +1,8 @@
+apiVersion: scaler.nishantsingh.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: scaledobject-sample
+  namespace: scaler
+spec:
+  deploymentName: hello
+  namespace: test

@@ -7,4 +7,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: kubebuilder-autoscaler
 repo: github.com/thakurnishu/kubebuilder-autoscaler
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: nishantsingh.sh
+  group: scaler
+  kind: ScaledObject
+  path: github.com/thakurnishu/kubebuilder-autoscaler/api/v1alpha1
+  version: v1alpha1
 version: "3"
