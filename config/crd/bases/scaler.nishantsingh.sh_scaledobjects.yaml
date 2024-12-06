@@ -39,15 +39,55 @@ spec:
           spec:
             description: ScaledObjectSpec defines the desired state of ScaledObject.
             properties:
-              deploymentName:
-                description: Name of Deployment Need to Watch for scaling operation
-                type: string
-              namespace:
-                description: Namespace of Deployment Need to Watch for scaling operation
-                type: string
+              scaleTargetRef:
+                properties:
+                  name:
+                    description: name of target
+                    type: string
+                  namespace:
+                    description: namespace where target is
+                    type: string
+                  type:
+                    description: type of target [only support deployment for now]
+                    type: string
+                required:
+                - name
+                - namespace
+                - type
+                type: object
+              triggers:
+                items:
+                  properties:
+                    metadata:
+                      properties:
+                        query:
+                          description: 'Query to run. Note: query must return a vector
+                            single element response'
+                          type: string
+                        serverAddress:
+                          description: Address of Prometheus server. If using VictoriaMetrics
+                            cluster version, set full URL to Prometheus querying API,
+                            e.g. http://<vmselect>:8481/select/0/prometheus
+                          type: string
+                        threshold:
+                          description: Value to start scaling for (This value can
+                            be a float)
+                          type: string
+                      required:
+                      - query
+                      - serverAddress
+                      - threshold
+                      type: object
+                    type:
+                      type: string
+                  required:
+                  - metadata
+                  - type
+                  type: object
+                type: array
             required:
-            - deploymentName
-            - namespace
+            - scaleTargetRef
+            - triggers
             type: object
           status:
             description: ScaledObjectStatus defines the observed state of ScaledObject.

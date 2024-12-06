@@ -23,14 +23,35 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+type Trigger struct {
+	Type     string          `json:"type"`
+	Metadata TriggerMetadata `json:"metadata"`
+}
+
+type TriggerMetadata struct {
+	// Address of Prometheus server. If using VictoriaMetrics cluster version, set full URL to Prometheus querying API, e.g. http://<vmselect>:8481/select/0/prometheus
+	ServerAddress string `json:"serverAddress"`
+	// Query to run. Note: query must return a vector single element response
+	Query string `json:"query"`
+	// Value to start scaling for (This value can be a float)
+	Threshold string `json:"threshold"`
+}
+
 // ScaledObjectSpec defines the desired state of ScaledObject.
 type ScaledObjectSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Name of Deployment Need to Watch for scaling operation
-	DeploymentName string `json:"deploymentName"`
-	// Namespace of Deployment Need to Watch for scaling operation
+	ScaleTargetRef ScaleTargetRef `json:"scaleTargetRef"`
+	Triggers       []Trigger      `json:"triggers"`
+}
+
+type ScaleTargetRef struct {
+	// type of target [only support deployment for now]
+	Type string `json:"type"`
+	// name of target
+	Name string `json:"name"`
+	// namespace where target is
 	Namespace string `json:"namespace"`
 }
 

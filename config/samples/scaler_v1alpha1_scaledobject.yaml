@@ -4,5 +4,13 @@ metadata:
   name: scaledobject-sample
   namespace: scaler
 spec:
-  deploymentName: hello
-  namespace: test
+  scaleTargetRef:
+    type: deployment
+    name: test
+    namespace: default
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://localhost:9090
+        threshold: '10'
+        query: 'sum(rate(apiserver_request_duration_seconds_sum[1h]))'

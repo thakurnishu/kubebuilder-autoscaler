@@ -19,6 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
+
+	prometheusapi "github.com/prometheus/client_golang/api"
+	prometheusapiv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	prometheusmodel "github.com/prometheus/common/model"
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -49,8 +54,7 @@ func (r *ScaledObjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=scaler.nishantsingh.sh,resources=scaledobjects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=scaler.nishantsingh.sh,resources=scaledobjects/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;update;patch;create;delete
-// +kubebuilder:rbac:groups="",resources=pods;services;services;secrets;external,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods;services;endpoints;secrets;external,verbs=get;list;watch
 // +kubebuilder:rbac:groups="*",resources="*",verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -78,23 +82,78 @@ func (r *ScaledObjectReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	reqLogger.Info("Reconcilling ScaledObject Starts", "deploymentName", scaledObject.Spec.DeploymentName, "namespace", scaledObject.Namespace)
+	reqLogger.Info("Reconcilling ScaledObject Starts")
+
+	for _, trigger := range scaledObject.Spec.Triggers {
+		if trigger.Type == "prometheus" {
+
+			serverAddr := trigger.Metadata.ServerAddress
+			query := trigger.Metadata.Query
+			err := runPrometheusQuery(ctx, serverAddr, query)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+		} else {
+			reqLogger.Error(fmt.Errorf(""), "currently only support prometheus as trigger")
+			return ctrl.Result{}, nil
+		}
+	}
+
 	err = r.updateDeploymentReplica(ctx, scaledObject)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			reqLogger.Error(err, fmt.Sprintf("unable to find deployment name %s in namespace %s", scaledObject.Spec.DeploymentName, scaledObject.Spec.Namespace))
+			reqLogger.Error(err, fmt.Sprintf("unable to find deployment name %s in namespace %s", scaledObject.Spec.ScaleTargetRef.Name, scaledObject.Spec.ScaleTargetRef.Namespace))
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, err
 	}
-	reqLogger.Info("Reconcilling ScaledObject Complete", "deploymentName", scaledObject.Spec.DeploymentName)
+	reqLogger.Info("Reconcilling ScaledObject Complete", "deploymentName", scaledObject.Spec.ScaleTargetRef.Name)
 
-	// Check if the ScaledObject instance is marked to be deleted, which is
-	// indicated by the deletion timestamp being set.
-	//if scaledObject.GetDeletionTimestamp() != nil {
-	//    return ctrl.Result{}, err // TODO
-	//}
 	return ctrl.Result{}, nil
+}
+
+func runPrometheusQuery(ctx context.Context, serverAddr, query string) error {
+	reqLogger := log.FromContext(ctx)
+	// Create a Prometheus client
+	client, err := prometheusapi.NewClient(prometheusapi.Config{Address: serverAddr})
+	if err != nil {
+		reqLogger.Error(err, "Prometheus: creating client:")
+		return err
+	}
+
+	// Create the API client
+	apiClient := prometheusapiv1.NewAPI(client)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, warnings, err := apiClient.Query(ctx, query, time.Now())
+	if err != nil {
+		reqLogger.Error(err, "Prometheus: executing query:")
+		return err
+	}
+
+	// Print warnings, if any
+	if len(warnings) > 0 {
+		reqLogger.Info("WARN: Prometheus warnings", "warnings", warnings)
+	}
+
+	vector, ok := result.(prometheusmodel.Vector)
+	if !ok {
+		reqLogger.Error(fmt.Errorf(""), "Prometheus Query result is not a vector.")
+		return fmt.Errorf("Query result is not a vector.")
+	}
+
+	// Extract the value
+	if len(vector) > 0 {
+		value := vector[0].Value
+		reqLogger.Info("Prometheus: ", "Result: ", value)
+		fmt.Println("Result:", value)
+	} else {
+		reqLogger.Error(fmt.Errorf(""), "Prometheus No Data Found.")
+	}
+	return nil
 }
 
 func (r *ScaledObjectReconciler) updateDeploymentReplica(ctx context.Context, scaledObject *scalerv1alpha1.ScaledObject) error {
@@ -102,14 +161,14 @@ func (r *ScaledObjectReconciler) updateDeploymentReplica(ctx context.Context, sc
 	deployment := &appsv1.Deployment{}
 
 	err := r.Get(ctx, client.ObjectKey{
-		Namespace: scaledObject.Spec.Namespace,
-		Name:      scaledObject.Spec.DeploymentName,
+		Namespace: scaledObject.Spec.ScaleTargetRef.Namespace,
+		Name:      scaledObject.Spec.ScaleTargetRef.Name,
 	}, deployment)
 	if err != nil {
 		return err
 	}
 
-	reqLogger.Info("Updating replicas to 0 for deployment", "deployment", scaledObject.Spec.DeploymentName)
+	reqLogger.Info("Updating replicas to 0 for deployment", "deployment", scaledObject.Spec.ScaleTargetRef.Name)
 
 	// Set replica to 0
 	var zero int32 = 0
@@ -118,9 +177,9 @@ func (r *ScaledObjectReconciler) updateDeploymentReplica(ctx context.Context, sc
 	// update deployment
 	err = r.Update(ctx, deployment)
 	if err != nil {
-		reqLogger.Error(err, fmt.Sprintf("failed to update deployment replicas to 0 for deployment %s", scaledObject.Spec.DeploymentName))
+		reqLogger.Error(err, fmt.Sprintf("failed to update deployment replicas to 0 for deployment %s", scaledObject.Spec.ScaleTargetRef.Name))
 		return err
 	}
-	reqLogger.Info("Successfully updated deployment replicas to 0", "deployment", scaledObject.Spec.DeploymentName)
+	reqLogger.Info("Successfully updated deployment replicas to 0", "deployment", scaledObject.Spec.ScaleTargetRef.Name)
 	return nil
 }
